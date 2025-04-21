@@ -3,14 +3,17 @@ import { SignUpInputDto } from './dtos/sign-up.input.dto';
 import { UserService } from '../user/user.service';
 import * as bcrypt from 'bcryptjs';
 import { SignInInputDto } from './dtos/sign-in.input.dto';
-import { randomUUID } from 'node:crypto';
 import {
   HashingError,
   InvalidPasswordError,
   UserAlreadyExistsError,
 } from '../shared/errors';
+import { TokenService } from 'src/token/token.service';
 
-export const makeAuthService = (deps: { userService: UserService }) => {
+export const makeAuthService = (deps: {
+  userService: UserService;
+  tokenService: TokenService;
+}) => {
   const signUp = (dto: SignUpInputDto) =>
     pipe(
       deps.userService.findByEmail(dto.email),
@@ -49,13 +52,16 @@ export const makeAuthService = (deps: { userService: UserService }) => {
         ),
       ),
       Effect.flatMap((user) =>
-        Effect.sync(() => ({
-          tokenId: randomUUID(),
-          tokenHash: randomUUID(),
+        deps.tokenService.strongToken.save({
           userId: user.id,
-        })),
+          roles: [],
+        }),
       ),
+      Effect.map(({ token }) => ({
+        token,
+      })),
     );
+
   return {
     signUp,
     signIn,
