@@ -75,6 +75,36 @@ const errorMap = {
       message: 'Unauthorized',
     }),
   },
+  ExpiredTokenError: {
+    status: 401,
+    payload: () => ({
+      message: 'Token has expired',
+    }),
+  },
+  InvalidTokenHashError: {
+    status: 401,
+    payload: () => ({
+      message: 'Invalid token hash',
+    }),
+  },
+  InvalidTokenTypeError: {
+    status: 401,
+    payload: () => ({
+      message: 'Invalid token type',
+    }),
+  },
+  JSONParseError: {
+    status: 500,
+    payload: () => ({
+      message: 'Error while parsing JSON. Check internal logs.',
+    }),
+  },
+  RedisError: {
+    status: 500,
+    payload: () => ({
+      message: 'Error while accessing Redis. Check internal logs.',
+    }),
+  },
 } as const satisfies ErrorMap;
 
 @Catch()

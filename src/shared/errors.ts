@@ -50,3 +50,31 @@ export class RevokedTokenError {
   readonly _tag = 'RevokedTokenError';
   constructor(readonly token: string) {}
 }
+
+export class RedisError {
+  readonly _tag = 'RedisError';
+  private logger = new Logger(RedisError.name);
+  constructor(readonly error: Error) {
+    this.logger.error(error);
+  }
+}
+
+export class InvalidTokenHashError {
+  readonly _tag = 'InvalidTokenError';
+}
+
+export class InvalidTokenTypeError {
+  readonly _tag = 'InvalidTokenTypeError';
+}
+
+export class ExpiredTokenError {
+  readonly _tag = 'ExpiredTokenError';
+}
+
+export class JSONParseError {
+  readonly _tag = 'JSONParseError';
+  private logger = new Logger(JSONParseError.name);
+  constructor(readonly error: Error) {
+    this.logger.error(error);
+  }
+}
