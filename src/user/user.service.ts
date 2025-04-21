@@ -23,7 +23,7 @@ export const makeUserService = (deps: { db: NodePgDatabase }) => {
         ),
     });
 
-  const createUser = (input: { email: string; passwordHash: string }) =>
+  const create = (input: { email: string; passwordHash: string }) =>
     tryPromise({
       try: () =>
         deps.db
@@ -38,9 +38,24 @@ export const makeUserService = (deps: { db: NodePgDatabase }) => {
         ),
     });
 
+  const findById = (id: number) =>
+    tryPromise({
+      try: () =>
+        deps.db
+          .select()
+          .from(User)
+          .where(eq(User.id, id))
+          .limit(1)
+          .execute()
+          .then((res) => res[0] ?? null),
+      catch: (err) =>
+        new DatabaseQueryFailedError('Error finding user by id', err as Error),
+    });
+
   return {
     findByEmail,
-    createUser,
+    create,
+    findById,
   };
 };
 

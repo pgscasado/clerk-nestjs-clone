@@ -29,7 +29,7 @@ export const makeAuthService = (deps: {
         }),
       ),
       Effect.flatMap((passwordHash) =>
-        deps.userService.createUser({ email: dto.email, passwordHash }),
+        deps.userService.create({ email: dto.email, passwordHash }),
       ),
       Effect.map((user) => ({
         id: user.id,

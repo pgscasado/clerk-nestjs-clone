@@ -21,6 +21,7 @@ type BaseToken = {
 
 export interface ApiKeyToken extends BaseToken {
   type: 'api-key';
+  projectId: number;
 }
 
 export interface StrongToken extends BaseToken {
@@ -32,6 +33,10 @@ export interface StrongToken extends BaseToken {
 
 export type Token = ApiKeyToken | StrongToken;
 
+type RedisTokenPayload<T extends Token['type']> = T extends 'api-key'
+  ? Pick<ApiKeyToken, 'projectId'>
+  : Pick<StrongToken, 'userId' | 'roles'>;
+
 export const makeTokenService = (deps: { redis: redisDb }) => {
   const redis = deps.redis;
 
@@ -42,7 +47,7 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
     return createHmac('sha256', HMAC_SECRET).update(secret).digest('base64url');
   };
 
-  const validateRedisToken = (token: string, type: Token['type']) =>
+  const baseTokenValidation = (token: string, type: Token['type']) =>
     pipe(
       Effect.succeed(decodeBase64(token)),
       Effect.flatMap((token) =>
@@ -99,33 +104,45 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
         },
         () => new InvalidTokenHashError(),
       ),
-      Effect.map((tokenData) => {
-        if (tokenData.type === 'strong-token') {
-          const now = Date.now();
-          return tokenData.expiresAt > now
-            ? Effect.succeed(tokenData)
-            : Effect.fail(new ExpiredTokenError());
-        }
-        if (tokenData.type === 'api-key') {
-          return Effect.tryPromise({
-            try: () => redis.get(`revoked-token:${tokenData.tokenId}`),
+    );
+
+  const validateStrongToken = (token: string) =>
+    pipe(
+      baseTokenValidation(token, 'strong-token'),
+      Effect.filterOrFail(
+        (tokenData): tokenData is StrongToken =>
+          tokenData.type === 'strong-token',
+        () => new InvalidTokenTypeError(),
+      ),
+      Effect.filterOrFail(
+        (tokenData) => tokenData.expiresAt > Date.now(),
+        () => new ExpiredTokenError(),
+      ),
+    );
+  const validateApiKeyToken = (token: string) =>
+    baseTokenValidation(token, 'api-key').pipe(
+      Effect.filterOrFail(
+        (tokenData): tokenData is ApiKeyToken => tokenData.type === 'api-key',
+        () => new InvalidTokenTypeError(),
+      ),
+      Effect.flatMap((tokenData) =>
+        pipe(
+          Effect.tryPromise({
+            try: () => redis.get(`revoked-api-key:${tokenData.tokenId}`),
             catch: (err) => new RedisError(err as Error),
-          }).pipe(
-            Effect.filterOrFail(
-              (revoked): revoked is null => revoked === null,
-              () => new RevokedTokenError(tokenData.tokenId),
-            ),
-            Effect.map(() => tokenData),
-          );
-        }
-      }),
+          }),
+          Effect.filterOrFail(
+            (revoked): revoked is null => revoked === null,
+            () => new RevokedTokenError(tokenData.tokenId),
+          ),
+          Effect.map(() => tokenData),
+        ),
+      ),
     );
 
   const saveRedisToken = <T extends Token['type']>(
     type: T,
-    input?: T extends 'strong-token'
-      ? { userId: number; roles: string[] }
-      : undefined,
+    input?: RedisTokenPayload<T>,
   ) =>
     pipe(
       Effect.succeed(randomBytes(32).toString('base64url')),
@@ -135,10 +152,9 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
             type,
             tokenId: randomUUID(),
             tokenSecret: secret,
-            userId: input?.userId,
-            roles: input?.roles,
             expiresAt: input ? Date.now() + 1000 * 60 * 60 * 24 * 7 : null,
             validityHash: generateValidityHash(secret),
+            ...input,
           }) as T extends 'api-key' ? ApiKeyToken : StrongToken,
       ),
       Effect.tap((token) =>
@@ -165,13 +181,13 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
 
   return {
     apiKey: {
-      validate: (token: string) => validateRedisToken(token, 'api-key'),
-      save: (input: Parameters<typeof saveRedisToken>[0]) =>
-        saveRedisToken(input),
+      validate: (token: string) => validateApiKeyToken(token),
+      save: (input: RedisTokenPayload<'api-key'>) =>
+        saveRedisToken('api-key', input),
     },
     strongToken: {
-      validate: (token: string) => validateRedisToken(token, 'strong-token'),
-      save: (input: Parameters<typeof saveRedisToken>[1]) =>
+      validate: (token: string) => validateStrongToken(token),
+      save: (input: RedisTokenPayload<'strong-token'>) =>
         saveRedisToken('strong-token', input),
     },
   };
