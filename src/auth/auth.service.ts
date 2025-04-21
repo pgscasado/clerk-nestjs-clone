@@ -1,7 +1,7 @@
 import { Effect, pipe } from 'effect';
 import { SignUpInputDto } from './dtos/sign-up.input.dto';
-import { makeUserService } from '../user/user.service';
-import bcrypt from 'bcryptjs';
+import { UserService } from '../user/user.service';
+import * as bcrypt from 'bcryptjs';
 import { SignInInputDto } from './dtos/sign-in.input.dto';
 import { randomUUID } from 'node:crypto';
 import {
@@ -10,9 +10,7 @@ import {
   UserAlreadyExistsError,
 } from '../shared/errors';
 
-export const makeAuthService = (deps: {
-  userService: ReturnType<typeof makeUserService>;
-}) => {
+export const makeAuthService = (deps: { userService: UserService }) => {
   const signUp = (dto: SignUpInputDto) =>
     pipe(
       deps.userService.findByEmail(dto.email),
@@ -63,3 +61,5 @@ export const makeAuthService = (deps: {
     signIn,
   };
 };
+
+export type AuthService = ReturnType<typeof makeAuthService>;
