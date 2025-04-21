@@ -4,7 +4,6 @@ import { SignUpInputDto } from './dtos/sign-up.input.dto';
 import { makeAuthService } from './auth.service';
 import { makeUserService } from '../user/user.service';
 import { db } from '../shared/db';
-import { Effect } from 'effect';
 
 @Controller('auth')
 export class AuthController {
@@ -13,13 +12,11 @@ export class AuthController {
 
   @Post('sign-in')
   async signIn(@Body() body: SignInInputDto) {
-    const result = await Effect.runPromise(this.authService.signIn(body));
-    return result;
+    return this.authService.signIn(body);
   }
 
   @Post('sign-up')
   async signUp(@Body() body: SignUpInputDto) {
-    const result = await Effect.runPromise(this.authService.signUp(body));
-    return result;
+    return this.authService.signUp(body);
   }
 }

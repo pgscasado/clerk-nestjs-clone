@@ -43,3 +43,5 @@ export const makeUserService = (deps: { db: NodePgDatabase }) => {
     createUser,
   };
 };
+
+export type UserService = ReturnType<typeof makeUserService>;
