@@ -10,6 +10,15 @@ async function setupSwagger(app) {
     .setDescription('The Clerk Clone API description')
     .setVersion('1.0')
     .addTag('clerk')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'Token',
+        description: 'Insira o token no formato: Bearer <token>',
+      },
+      'access-token', // <-- esse é o nome que você vai usar no decorator abaixo
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, options);

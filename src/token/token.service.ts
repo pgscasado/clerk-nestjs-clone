@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { Effect, pipe } from 'effect';
 import { redisDb } from 'src/shared/db/redis';
 import {
@@ -10,6 +10,8 @@ import {
   RevokedTokenError,
   TokenNotFoundError,
 } from 'src/shared/errors';
+
+const HMAC_SECRET = process.env.HMAC_SECRET;
 
 type BaseToken = {
   tokenId: string;
@@ -36,12 +38,16 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
   const decodeBase64 = (str: string) =>
     Buffer.from(str, 'base64url').toString();
 
+  const generateValidityHash = (secret: string) => {
+    return createHmac('sha256', HMAC_SECRET).update(secret).digest('base64url');
+  };
+
   const validateRedisToken = (token: string, type: Token['type']) =>
     pipe(
-      Effect.succeed(token),
+      Effect.succeed(decodeBase64(token)),
       Effect.flatMap((token) =>
         Effect.tryPromise({
-          try: () => redis.get(`api-key:${token}`),
+          try: () => redis.get(`token:${token}`),
           catch: (cause) => new RedisError(cause as Error),
         }),
       ),
@@ -56,11 +62,8 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
       Effect.filterOrFail(
         (tokenData) => {
           const decoded = decodeBase64(token);
-          const [, secret] = decoded.split('.');
-          return (
-            tokenData.tokenId === token.split('.')[0] &&
-            tokenData.tokenSecret === secret
-          );
+          const [id, secret] = decoded.split('.');
+          return tokenData.tokenId === id && tokenData.tokenSecret === secret;
         },
         () => new InvalidTokenHashError(),
       ),
@@ -68,14 +71,34 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
         (tokenData) => tokenData.type === type,
         () => new InvalidTokenTypeError(),
       ),
-      Effect.filterOrFail((tokenData) => {
-        const inputHash = Buffer.from(token.split('.')[1], 'base64url');
-        const validityHash = Buffer.from(tokenData.validityHash, 'base64url');
-        return (
-          inputHash.length === validityHash.length &&
-          timingSafeEqual(inputHash, validityHash)
-        );
-      }),
+      Effect.filterOrFail(
+        (tokenData) => {
+          try {
+            // Decodifica o token base64url
+            const rawToken = Buffer.from(token, 'base64url').toString(); // tokenId.tokenSecret
+            const [tokenId, tokenSecret] = rawToken.split('.');
+
+            if (!tokenId || !tokenSecret) return false;
+
+            // Gera o hash esperado com HMAC do tokenSecret
+            const expectedHash = createHmac('sha256', HMAC_SECRET)
+              .update(tokenSecret)
+              .digest();
+
+            // Converte o hash armazenado (também base64url) para buffer
+            const storedHash = Buffer.from(tokenData.validityHash, 'base64url');
+
+            // Comparação segura
+            return (
+              expectedHash.length === storedHash.length &&
+              timingSafeEqual(expectedHash, storedHash)
+            );
+          } catch (e) {
+            return false;
+          }
+        },
+        () => new InvalidTokenHashError(),
+      ),
       Effect.map((tokenData) => {
         if (tokenData.type === 'strong-token') {
           const now = Date.now();
@@ -85,7 +108,7 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
         }
         if (tokenData.type === 'api-key') {
           return Effect.tryPromise({
-            try: () => redis.get(`revoked-api-key:${tokenData.tokenId}`),
+            try: () => redis.get(`revoked-token:${tokenData.tokenId}`),
             catch: (err) => new RedisError(err as Error),
           }).pipe(
             Effect.filterOrFail(
@@ -105,28 +128,38 @@ export const makeTokenService = (deps: { redis: redisDb }) => {
       : undefined,
   ) =>
     pipe(
-      Effect.succeed({
-        type,
-        tokenId: randomUUID(),
-        tokenSecret: randomBytes(32).toString('base64url'),
-        userId: input?.userId,
-        roles: input?.roles,
-        expiresAt: input ? Date.now() + 1000 * 60 * 60 * 24 * 7 : null,
-        validityHash: randomBytes(32).toString('base64'),
-      } satisfies Token),
+      Effect.succeed(randomBytes(32).toString('base64url')),
+      Effect.map(
+        (secret) =>
+          ({
+            type,
+            tokenId: randomUUID(),
+            tokenSecret: secret,
+            userId: input?.userId,
+            roles: input?.roles,
+            expiresAt: input ? Date.now() + 1000 * 60 * 60 * 24 * 7 : null,
+            validityHash: generateValidityHash(secret),
+          }) as T extends 'api-key' ? ApiKeyToken : StrongToken,
+      ),
       Effect.tap((token) =>
         Effect.tryPromise({
           try: () =>
             redis.set(
-              `api-key:${token.tokenId}.${token.tokenSecret}`,
+              `token:${token.tokenId}.${token.tokenSecret}`,
               JSON.stringify(token),
+              'EX',
+              'expiresAt' in token
+                ? (token.expiresAt - Date.now()) / 1000
+                : null,
             ),
           catch: (err) => new RedisError(err as Error),
         }),
       ),
       Effect.map((token) => ({
         tokenId: token.tokenId,
-        token: `${token.tokenId}.${token.tokenSecret}`,
+        token: Buffer.from(`${token.tokenId}.${token.tokenSecret}`).toString(
+          'base64url',
+        ),
       })),
     );
 
